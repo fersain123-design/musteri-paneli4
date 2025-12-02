@@ -52,9 +52,11 @@
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
+    "@expo/webpack-config": "^19.0.1",
     "@types/react": "~19.0.10",
     "eslint": "^9.25.0",
     "eslint-config-expo": "~9.2.0",
+    "html-webpack-plugin": "^5.6.5",
     "typescript": "~5.8.3"
   },
   "private": true,
