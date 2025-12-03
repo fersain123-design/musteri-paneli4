@@ -252,6 +252,11 @@ async def register(user_data: UserCreate):
     if existing_user:
         raise HTTPException(status_code=400, detail="Email already registered")
     
+    # Validate role
+    valid_roles = ["customer", "vendor", "admin"]
+    if user_data.role not in valid_roles:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {', '.join(valid_roles)}")
+    
     # Create user
     user_dict = user_data.model_dump()
     user_dict["password"] = get_password_hash(user_data.password)
@@ -261,8 +266,12 @@ async def register(user_data: UserCreate):
     result = await db.users.insert_one(user_dict)
     user_id = str(result.inserted_id)
     
-    # Create access token
-    access_token = create_access_token(data={"sub": user_id})
+    # Create access token with role
+    access_token = create_access_token(data={
+        "sub": user_id,
+        "email": user_data.email,
+        "role": user_data.role
+    })
     
     # Return user data
     user_dict["_id"] = user_id
@@ -271,7 +280,15 @@ async def register(user_data: UserCreate):
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": user_dict
+        "user": {
+            "id": user_id,
+            "email": user_dict["email"],
+            "full_name": user_dict["full_name"],
+            "phone": user_dict["phone"],
+            "role": user_dict["role"],
+            "is_active": user_dict["is_active"],
+            "created_at": user_dict["created_at"]
+        }
     }
 
 @api_router.post("/auth/login", response_model=Token)
