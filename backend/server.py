@@ -785,56 +785,11 @@ async def clear_cart(current_user: dict = Depends(get_current_user)):
     )
     return {"message": "Cart cleared"}
 
-# ============== ORDER ENDPOINTS ==============
-
-@api_router.post("/orders")
-async def create_order(order_data: OrderCreate, current_user: dict = Depends(get_current_user)):
-    order_dict = order_data.model_dump()
-    order_dict["user_id"] = current_user["_id"]
-    order_dict["status"] = "pending"
-    order_dict["courier_id"] = None
-    order_dict["created_at"] = datetime.utcnow()
-    order_dict["updated_at"] = datetime.utcnow()
-    
-    result = await db.orders.insert_one(order_dict)
-    order_dict["_id"] = str(result.inserted_id)
-    
-    # Clear cart after order
-    await db.carts.update_one(
-        {"user_id": current_user["_id"]},
-        {"$set": {"items": [], "total": 0.0, "updated_at": datetime.utcnow()}}
-    )
-    
-    # Update product stock
-    for item in order_data.items:
-        if ObjectId.is_valid(item.product_id):
-            await db.products.update_one(
-                {"_id": ObjectId(item.product_id)},
-                {"$inc": {"stock": -item.quantity}}
-            )
-    
-    return order_dict
-
-@api_router.get("/orders")
-async def get_my_orders(current_user: dict = Depends(get_current_user)):
-    orders = await db.orders.find({"user_id": current_user["_id"]}).sort("created_at", -1).to_list(100)
-    for order in orders:
-        order["_id"] = str(order["_id"])
-    return orders
-
-@api_router.get("/orders/vendor")
-async def get_orders_for_vendor(current_user: dict = Depends(get_current_user)):
-    vendor = await db.vendor_profiles.find_one({"user_id": current_user["_id"]})
-    if not vendor:
-        raise HTTPException(status_code=403, detail="Only vendors can access this")
-    
-    orders = await db.orders.find({"vendor_id": str(vendor["_id"])}).sort("created_at", -1).to_list(100)
-    for order in orders:
-        order["_id"] = str(order["_id"])
-    return orders
+# ============== LEGACY ORDER ENDPOINTS (kept for backward compatibility) ==============
 
 @api_router.get("/orders/{order_id}")
-async def get_order(order_id: str, current_user: dict = Depends(get_current_user)):
+async def get_order_by_id(order_id: str, current_user: dict = Depends(get_current_user)):
+    """Get single order by ID (legacy endpoint)"""
     if not ObjectId.is_valid(order_id):
         raise HTTPException(status_code=400, detail="Invalid order ID")
     
@@ -844,26 +799,22 @@ async def get_order(order_id: str, current_user: dict = Depends(get_current_user
     
     # Check authorization
     if order["user_id"] != current_user["_id"]:
-        vendor = await db.vendor_profiles.find_one({"user_id": current_user["_id"]})
-        if not vendor or order["vendor_id"] != str(vendor["_id"]):
+        # Allow vendor/admin to view
+        if current_user.get("role") not in ["vendor", "admin"]:
             raise HTTPException(status_code=403, detail="Not authorized")
     
     order["_id"] = str(order["_id"])
     return order
 
 @api_router.put("/orders/{order_id}/status")
-async def update_order_status(order_id: str, status: str, current_user: dict = Depends(get_current_user)):
+async def update_order_status(order_id: str, status: str, current_user: dict = Depends(require_role(["vendor", "admin"]))):
+    """Update order status (vendor/admin only)"""
     if not ObjectId.is_valid(order_id):
         raise HTTPException(status_code=400, detail="Invalid order ID")
     
     order = await db.orders.find_one({"_id": ObjectId(order_id)})
     if not order:
         raise HTTPException(status_code=404, detail="Order not found")
-    
-    # Verify vendor
-    vendor = await db.vendor_profiles.find_one({"user_id": current_user["_id"]})
-    if not vendor or order["vendor_id"] != str(vendor["_id"]):
-        raise HTTPException(status_code=403, detail="Not authorized")
     
     valid_statuses = ["pending", "accepted", "preparing", "ready", "delivering", "completed", "cancelled"]
     if status not in valid_statuses:
