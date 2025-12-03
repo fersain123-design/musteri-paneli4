@@ -347,6 +347,32 @@ async def login(credentials: UserLogin):
 async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
+# ============== ROLE-BASED TEST ENDPOINTS ==============
+
+@api_router.get("/admin/dashboard")
+async def admin_dashboard(current_user: dict = Depends(require_role(["admin"]))):
+    """Admin-only endpoint"""
+    return {
+        "message": "Welcome to admin dashboard",
+        "user": {
+            "id": current_user["_id"],
+            "email": current_user.get("email"),
+            "role": current_user.get("role")
+        }
+    }
+
+@api_router.get("/vendor/test")
+async def vendor_test(current_user: dict = Depends(require_role(["vendor", "admin"]))):
+    """Vendor and Admin can access"""
+    return {
+        "message": "Vendor area - accessible by vendor and admin",
+        "user": {
+            "id": current_user["_id"],
+            "email": current_user.get("email"),
+            "role": current_user.get("role")
+        }
+    }
+
 # ============== VENDOR ENDPOINTS ==============
 
 @api_router.post("/vendors/profile")
