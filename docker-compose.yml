@@ -1,0 +1,28 @@
+version: '3.8'
+services:
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: appdb
+      POSTGRES_USER: appuser
+      POSTGRES_PASSWORD: apppassword
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+  server:
+    build:
+      context: ./server
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: development
+      DATABASE_URL: postgres://appuser:apppassword@db:5432/appdb
+      JWT_SECRET: replace_me_with_a_strong_secret
+    depends_on:
+      - db
+    ports:
+      - "4000:4000"
+    volumes:
+      - ./server:/usr/src/app
+volumes:
+  db-data:
