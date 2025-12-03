@@ -240,8 +240,25 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     if user is None:
         raise credentials_exception
     
+    # Add decoded token data to user object for easy access
     user["_id"] = str(user["_id"])
+    user["role"] = user.get("role", "customer")
     return user
+
+def require_role(allowed_roles: List[str]):
+    """
+    Dependency to check if current user has one of the allowed roles
+    Usage: current_user: dict = Depends(require_role(["admin", "vendor"]))
+    """
+    async def role_checker(current_user: dict = Depends(get_current_user)):
+        user_role = current_user.get("role", "customer")
+        if user_role not in allowed_roles:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"Access denied. Required roles: {', '.join(allowed_roles)}"
+            )
+        return current_user
+    return role_checker
 
 # ============== AUTH ENDPOINTS ==============
 
