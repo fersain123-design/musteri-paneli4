@@ -301,15 +301,29 @@ async def login(credentials: UserLogin):
         raise HTTPException(status_code=403, detail="Account is inactive")
     
     user_id = str(user["_id"])
-    access_token = create_access_token(data={"sub": user_id})
+    user_role = user.get("role", "customer")
+    user_email = user.get("email")
     
-    user["_id"] = user_id
-    del user["password"]
+    # Create access token with role and email
+    access_token = create_access_token(data={
+        "sub": user_id,
+        "email": user_email,
+        "role": user_role
+    })
     
+    # Return structured user data
     return {
         "access_token": access_token,
         "token_type": "bearer",
-        "user": user
+        "user": {
+            "id": user_id,
+            "email": user_email,
+            "full_name": user.get("full_name", ""),
+            "phone": user.get("phone", ""),
+            "role": user_role,
+            "is_active": user.get("is_active", True),
+            "created_at": user.get("created_at")
+        }
     }
 
 @api_router.get("/auth/me")
