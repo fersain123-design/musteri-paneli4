@@ -347,29 +347,228 @@ async def login(credentials: UserLogin):
 async def get_me(current_user: dict = Depends(get_current_user)):
     return current_user
 
-# ============== ROLE-BASED TEST ENDPOINTS ==============
+# ============== CUSTOMER ENDPOINTS ==============
 
-@api_router.get("/admin/dashboard")
-async def admin_dashboard(current_user: dict = Depends(require_role(["admin"]))):
-    """Admin-only endpoint"""
+@api_router.get("/products")
+async def get_all_products(category: Optional[str] = None, search: Optional[str] = None, skip: int = 0, limit: int = 50):
+    """
+    Get all products (public or authenticated)
+    Query params: category, search, skip, limit
+    """
+    query = {"is_available": True}
+    
+    if category:
+        query["category"] = category
+    
+    if search:
+        query["name"] = {"$regex": search, "$options": "i"}
+    
+    products = await db.products.find(query).skip(skip).limit(limit).to_list(limit)
+    for product in products:
+        product["_id"] = str(product["_id"])
+    return products
+
+@api_router.get("/products/{product_id}")
+async def get_product_by_id(product_id: str):
+    """Get single product by ID"""
+    if not ObjectId.is_valid(product_id):
+        raise HTTPException(status_code=400, detail="Invalid product ID")
+    
+    product = await db.products.find_one({"_id": ObjectId(product_id)})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    product["_id"] = str(product["_id"])
+    return product
+
+@api_router.post("/orders")
+async def create_order(order_data: OrderCreate, current_user: dict = Depends(require_role(["customer"]))):
+    """
+    Create new order (customer only)
+    """
+    order_dict = order_data.model_dump()
+    order_dict["user_id"] = current_user["_id"]
+    order_dict["status"] = "pending"
+    order_dict["courier_id"] = None
+    order_dict["created_at"] = datetime.utcnow()
+    order_dict["updated_at"] = datetime.utcnow()
+    
+    result = await db.orders.insert_one(order_dict)
+    order_dict["_id"] = str(result.inserted_id)
+    
+    # Clear cart after order
+    await db.carts.update_one(
+        {"user_id": current_user["_id"]},
+        {"$set": {"items": [], "total": 0.0, "updated_at": datetime.utcnow()}}
+    )
+    
+    # Update product stock
+    for item in order_data.items:
+        if ObjectId.is_valid(item.product_id):
+            await db.products.update_one(
+                {"_id": ObjectId(item.product_id)},
+                {"$inc": {"stock": -item.quantity}}
+            )
+    
     return {
-        "message": "Welcome to admin dashboard",
-        "user": {
-            "id": current_user["_id"],
-            "email": current_user.get("email"),
-            "role": current_user.get("role")
-        }
+        "order_id": order_dict["_id"],
+        "status": order_dict["status"],
+        "total": order_dict["total"],
+        "created_at": order_dict["created_at"]
     }
 
-@api_router.get("/vendor/test")
-async def vendor_test(current_user: dict = Depends(require_role(["vendor", "admin"]))):
-    """Vendor and Admin can access"""
+@api_router.get("/orders/my")
+async def get_my_orders(current_user: dict = Depends(require_role(["customer"]))):
+    """
+    Get current user's orders (customer only)
+    """
+    orders = await db.orders.find({"user_id": current_user["_id"]}).sort("created_at", -1).to_list(100)
+    for order in orders:
+        order["_id"] = str(order["_id"])
+    return orders
+
+# ============== VENDOR ENDPOINTS ==============
+
+@api_router.get("/vendor/products")
+async def get_vendor_products(current_user: dict = Depends(require_role(["vendor", "admin"]))):
+    """
+    Get vendor's products (vendor and admin only)
+    """
+    # If admin, can see all products
+    if current_user.get("role") == "admin":
+        products = await db.products.find({}).to_list(100)
+    else:
+        # Find vendor's user_id in products (using role-based filtering)
+        products = await db.products.find({"vendor_id": current_user["_id"]}).to_list(100)
+    
+    for product in products:
+        product["_id"] = str(product["_id"])
+    return products
+
+@api_router.post("/vendor/products")
+async def create_vendor_product(product: ProductCreate, current_user: dict = Depends(require_role(["vendor", "admin"]))):
+    """
+    Create new product (vendor and admin only)
+    """
+    product_dict = product.model_dump()
+    product_dict["vendor_id"] = current_user["_id"]  # Store user_id as vendor_id
+    product_dict["created_at"] = datetime.utcnow()
+    product_dict["updated_at"] = datetime.utcnow()
+    
+    result = await db.products.insert_one(product_dict)
+    product_dict["_id"] = str(result.inserted_id)
+    
+    return product_dict
+
+@api_router.put("/vendor/products/{product_id}")
+async def update_vendor_product(product_id: str, update_data: ProductUpdate, current_user: dict = Depends(require_role(["vendor", "admin"]))):
+    """
+    Update product (owner vendor or admin only)
+    """
+    if not ObjectId.is_valid(product_id):
+        raise HTTPException(status_code=400, detail="Invalid product ID")
+    
+    product = await db.products.find_one({"_id": ObjectId(product_id)})
+    if not product:
+        raise HTTPException(status_code=404, detail="Product not found")
+    
+    # Check authorization: admin can edit all, vendor can only edit their own
+    if current_user.get("role") != "admin":
+        if product.get("vendor_id") != current_user["_id"]:
+            raise HTTPException(status_code=403, detail="Not authorized to edit this product")
+    
+    update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
+    update_dict["updated_at"] = datetime.utcnow()
+    
+    await db.products.update_one({"_id": ObjectId(product_id)}, {"$set": update_dict})
+    
+    updated_product = await db.products.find_one({"_id": ObjectId(product_id)})
+    updated_product["_id"] = str(updated_product["_id"])
+    return updated_product
+
+@api_router.get("/vendor/orders")
+async def get_vendor_orders(current_user: dict = Depends(require_role(["vendor", "admin"]))):
+    """
+    Get vendor's orders (vendor and admin only)
+    For now, returns all orders. In production, filter by vendor_id.
+    """
+    # If admin, show all orders
+    if current_user.get("role") == "admin":
+        orders = await db.orders.find({}).sort("created_at", -1).to_list(100)
+    else:
+        # For vendor, show orders related to their products
+        # Simplified: showing all orders (in production, filter by vendor_id in order items)
+        orders = await db.orders.find({}).sort("created_at", -1).to_list(100)
+    
+    for order in orders:
+        order["_id"] = str(order["_id"])
+    return orders
+
+# ============== ADMIN ENDPOINTS ==============
+
+@api_router.get("/admin/users")
+async def get_all_users(current_user: dict = Depends(require_role(["admin"]))):
+    """
+    Get all users (admin only)
+    """
+    users = await db.users.find({}, {"password": 0}).to_list(1000)
+    for user in users:
+        user["_id"] = str(user["_id"])
+    return users
+
+@api_router.get("/admin/vendors")
+async def get_all_vendors(current_user: dict = Depends(require_role(["admin"]))):
+    """
+    Get all vendor users (admin only)
+    """
+    vendors = await db.users.find({"role": "vendor"}, {"password": 0}).to_list(1000)
+    for vendor in vendors:
+        vendor["_id"] = str(vendor["_id"])
+    return vendors
+
+@api_router.get("/admin/statistics")
+async def get_admin_statistics(current_user: dict = Depends(require_role(["admin"]))):
+    """
+    Get platform statistics (admin only)
+    """
+    # Count users
+    total_users = await db.users.count_documents({})
+    total_customers = await db.users.count_documents({"role": "customer"})
+    total_vendors = await db.users.count_documents({"role": "vendor"})
+    total_admins = await db.users.count_documents({"role": "admin"})
+    
+    # Count orders
+    total_orders = await db.orders.count_documents({})
+    pending_orders = await db.orders.count_documents({"status": "pending"})
+    completed_orders = await db.orders.count_documents({"status": "completed"})
+    
+    # Calculate revenue
+    all_orders = await db.orders.find({"status": "completed"}).to_list(10000)
+    total_revenue = sum(order.get("total", 0) for order in all_orders)
+    
+    # Count products
+    total_products = await db.products.count_documents({})
+    active_products = await db.products.count_documents({"is_available": True})
+    
     return {
-        "message": "Vendor area - accessible by vendor and admin",
-        "user": {
-            "id": current_user["_id"],
-            "email": current_user.get("email"),
-            "role": current_user.get("role")
+        "users": {
+            "total": total_users,
+            "customers": total_customers,
+            "vendors": total_vendors,
+            "admins": total_admins
+        },
+        "orders": {
+            "total": total_orders,
+            "pending": pending_orders,
+            "completed": completed_orders
+        },
+        "revenue": {
+            "total": round(total_revenue, 2),
+            "currency": "TRY"
+        },
+        "products": {
+            "total": total_products,
+            "active": active_products
         }
     }
 
