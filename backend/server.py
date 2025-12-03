@@ -572,7 +572,7 @@ async def get_admin_statistics(current_user: dict = Depends(require_role(["admin
         }
     }
 
-# ============== VENDOR ENDPOINTS ==============
+# ============== LEGACY VENDOR PROFILE ENDPOINTS (kept for backward compatibility) ==============
 
 @api_router.post("/vendors/profile")
 async def create_vendor_profile(profile: VendorProfileCreate, current_user: dict = Depends(get_current_user)):
@@ -624,7 +624,7 @@ async def get_nearby_vendors(latitude: float, longitude: float, radius: float = 
     return nearby_vendors
 
 @api_router.get("/vendors/all")
-async def get_all_vendors():
+async def get_all_vendors_list():
     vendors = await db.vendor_profiles.find({"is_approved": True}).to_list(100)
     for vendor in vendors:
         vendor["_id"] = str(vendor["_id"])
@@ -641,109 +641,6 @@ async def get_vendor_by_id(vendor_id: str):
     
     vendor["_id"] = str(vendor["_id"])
     return vendor
-
-# ============== PRODUCT ENDPOINTS ==============
-
-@api_router.post("/products")
-async def create_product(product: ProductCreate, current_user: dict = Depends(get_current_user)):
-    # Verify vendor profile exists
-    vendor = await db.vendor_profiles.find_one({"user_id": current_user["_id"]})
-    if not vendor:
-        raise HTTPException(status_code=403, detail="Only vendors can create products")
-    
-    product_dict = product.model_dump()
-    product_dict["vendor_id"] = str(vendor["_id"])
-    product_dict["created_at"] = datetime.utcnow()
-    product_dict["updated_at"] = datetime.utcnow()
-    
-    result = await db.products.insert_one(product_dict)
-    product_dict["_id"] = str(result.inserted_id)
-    
-    return product_dict
-
-@api_router.get("/products/vendor/{vendor_id}")
-async def get_products_by_vendor_id(vendor_id: str, skip: int = 0, limit: int = 50):
-    products = await db.products.find({"vendor_id": vendor_id}).skip(skip).limit(limit).to_list(limit)
-    for product in products:
-        product["_id"] = str(product["_id"])
-    return products
-
-@api_router.get("/products/my-products")
-async def get_my_products(current_user: dict = Depends(get_current_user)):
-    vendor = await db.vendor_profiles.find_one({"user_id": current_user["_id"]})
-    if not vendor:
-        raise HTTPException(status_code=403, detail="Only vendors can access this")
-    
-    products = await db.products.find({"vendor_id": str(vendor["_id"])}).to_list(100)
-    for product in products:
-        product["_id"] = str(product["_id"])
-    return products
-
-@api_router.get("/products/{product_id}")
-async def get_product(product_id: str):
-    if not ObjectId.is_valid(product_id):
-        raise HTTPException(status_code=400, detail="Invalid product ID")
-    
-    product = await db.products.find_one({"_id": ObjectId(product_id)})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
-    product["_id"] = str(product["_id"])
-    return product
-
-@api_router.put("/products/{product_id}")
-async def update_product(product_id: str, update_data: ProductUpdate, current_user: dict = Depends(get_current_user)):
-    if not ObjectId.is_valid(product_id):
-        raise HTTPException(status_code=400, detail="Invalid product ID")
-    
-    product = await db.products.find_one({"_id": ObjectId(product_id)})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
-    # Verify ownership
-    vendor = await db.vendor_profiles.find_one({"user_id": current_user["_id"]})
-    if not vendor or str(vendor["_id"]) != product["vendor_id"]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
-    update_dict = {k: v for k, v in update_data.model_dump().items() if v is not None}
-    update_dict["updated_at"] = datetime.utcnow()
-    
-    await db.products.update_one({"_id": ObjectId(product_id)}, {"$set": update_dict})
-    
-    updated_product = await db.products.find_one({"_id": ObjectId(product_id)})
-    updated_product["_id"] = str(updated_product["_id"])
-    return updated_product
-
-@api_router.delete("/products/{product_id}")
-async def delete_product(product_id: str, current_user: dict = Depends(get_current_user)):
-    if not ObjectId.is_valid(product_id):
-        raise HTTPException(status_code=400, detail="Invalid product ID")
-    
-    product = await db.products.find_one({"_id": ObjectId(product_id)})
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    
-    vendor = await db.vendor_profiles.find_one({"user_id": current_user["_id"]})
-    if not vendor or str(vendor["_id"]) != product["vendor_id"]:
-        raise HTTPException(status_code=403, detail="Not authorized")
-    
-    await db.products.delete_one({"_id": ObjectId(product_id)})
-    return {"message": "Product deleted successfully"}
-
-@api_router.get("/products")
-async def search_products(category: Optional[str] = None, search: Optional[str] = None, skip: int = 0, limit: int = 50):
-    query = {"is_available": True}
-    
-    if category:
-        query["category"] = category
-    
-    if search:
-        query["name"] = {"$regex": search, "$options": "i"}
-    
-    products = await db.products.find(query).skip(skip).limit(limit).to_list(limit)
-    for product in products:
-        product["_id"] = str(product["_id"])
-    return products
 
 # ============== CART ENDPOINTS ==============
 
