@@ -52,7 +52,7 @@ class UserBase(BaseModel):
     email: EmailStr
     full_name: str
     phone: str
-    role: str = "customer"  # customer, vendor, courier
+    role: str = "customer"  # customer, vendor, admin
 
 class UserCreate(UserBase):
     password: str
