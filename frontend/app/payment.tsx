@@ -73,7 +73,7 @@ export default function Payment() {
 
     try {
       // Get origin URL for success/cancel redirects
-      const originUrl = process.env.EXPO_PUBLIC_BACKEND_URL?.replace('/api', '') || 'https://manavim-vendor-2.preview.emergentagent.com';
+      const originUrl = process.env.EXPO_PUBLIC_BACKEND_URL?.replace('/api', '') || 'https://shopping-app-16.preview.emergentagent.com';
 
       const response = await api.post('/payment/create-session', {
         package_id: selectedPackage,
