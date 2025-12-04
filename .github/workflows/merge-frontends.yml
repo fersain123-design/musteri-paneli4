@@ -1,0 +1,71 @@
+name: Merge frontends into monorepo
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  merge_frontends:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout monorepo branch
+        uses: actions/checkout@v4
+        with:
+          ref: monorepo-merge
+          fetch-depth: 0
+
+      - name: Set up git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Determine token to use
+        id: token
+        run: |
+          if [ -n "${{ secrets.PERSONAL_TOKEN }}" ]; then
+            echo "token=${{ secrets.PERSONAL_TOKEN }}" >> $GITHUB_OUTPUT
+          else
+            echo "token=${{ secrets.GITHUB_TOKEN }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Clone seller repo
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          git clone https://x-access-token:${TOKEN}@github.com/fersain123-design/Satici-paneli4.git /tmp/seller || true
+
+      - name: Clone admin repo
+        env:
+          TOKEN: ${{ steps.token.outputs.token }}
+        run: |
+          git clone https://x-access-token:${TOKEN}@github.com/fersain123-design/Admin-panel4.git /tmp/admin || true
+
+      - name: Copy frontends into clients/
+        run: |
+          mkdir -p clients/seller clients/admin clients/customer
+          if [ -d /tmp/seller/frontend ]; then
+            rsync -a --delete /tmp/seller/frontend/ clients/seller/
+          elif [ -d /tmp/seller ]; then
+            rsync -a --delete /tmp/seller/ clients/seller/
+          fi
+          if [ -d /tmp/admin/frontend ]; then
+            rsync -a --delete /tmp/admin/frontend/ clients/admin/
+          elif [ -d /tmp/admin ]; then
+            rsync -a --delete /tmp/admin/ clients/admin/
+          fi
+          if [ -d frontend ]; then
+            rsync -a --delete frontend/ clients/customer/
+            git rm -r --ignore-unmatch frontend || true
+          fi
+          git add clients || true
+
+      - name: Commit and push changes
+        run: |
+          if git diff --staged --quiet; then
+            echo "No changes to commit"
+          else
+            git commit -m "Merge frontends from seller/admin into clients/"
+            git push origin monorepo-merge
+          fi
