@@ -1,0 +1,43 @@
+name: Update frontend API base URLs
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  update_urls:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout monorepo branch
+        uses: actions/checkout@v4
+        with:
+          ref: monorepo-merge
+          fetch-depth: 0
+
+      - name: Replace API base URLs
+        run: |
+          shopt -s globstar || true
+          # Update .env-style variables
+          for f in **/.env*; do
+            if [ -f "$f" ]; then
+              sed -E -i 's|^(REACT_APP_API_URL|VUE_APP_API_URL|API_URL)=.*$|\1=http://localhost:4000/api|g' "$f" || true
+            fi
+          done
+          # Update common axios/baseURL patterns in JS/TS files
+          for f in **/*.{js,ts,jsx,tsx}; do
+            [ -f "$f" ] || continue
+            sed -E -i "s|(baseURL:\\s*['\"])https?://[^'\"]+(['\"])|\\1http://localhost:4000/api\\2|g" "$f" || true
+            sed -E -i "s|(axios\\.create\\([^)]*baseURL:\\s*['\"])https?://[^'\"]+(['\"])|\\1http://localhost:4000/api\\2|g" "$f" || true
+          done
+          git add -A || true
+
+      - name: Commit and push URL updates
+        run: |
+          if git diff --staged --quiet; then
+            echo "No URL changes to commit"
+          else
+            git commit -m "Update frontend API base URLs to http://localhost:4000/api"
+            git push origin monorepo-merge
+          fi
