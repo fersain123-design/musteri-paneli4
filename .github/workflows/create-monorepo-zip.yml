@@ -1,0 +1,24 @@
+name: Create monorepo ZIP
+
+on:
+  workflow_dispatch:
+
+jobs:
+  zip-monorepo:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout monorepo-merge branch
+        uses: actions/checkout@v4
+        with:
+          ref: monorepo-merge
+
+      - name: Create ZIP file
+        run: |
+          zip -r monorepo.zip .
+
+      - name: Upload ZIP as artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: monorepo-zip
+          path: monorepo.zip
